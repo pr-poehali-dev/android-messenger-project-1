@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 
-type Screen = "chats" | "contacts" | "profile" | "settings" | "search" | "notifications" | "chat" | "create-group" | "group-settings";
+type Screen = "chats" | "contacts" | "profile" | "settings" | "search" | "notifications" | "chat" | "create-group" | "group-settings" | "call";
+
+type CallState = "calling" | "connected" | "ended";
 
 type MemberRole = "admin" | "moderator" | "member";
 
@@ -93,6 +95,8 @@ export default function Index() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"chats" | "contacts">("chats");
   const [chats, setChats] = useState<Chat[]>(CHATS);
+  const [callContact, setCallContact] = useState<Chat | null>(null);
+  const [isVideoCall, setIsVideoCall] = useState(false);
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([
     { contact: CONTACTS[0], role: "admin" },
     { contact: CONTACTS[1], role: "moderator" },
@@ -188,6 +192,13 @@ export default function Index() {
             }}
           />
         )}
+        {screen === "call" && callContact && (
+          <CallScreen
+            chat={callContact}
+            isVideo={isVideoCall}
+            onEnd={() => { setScreen("chat"); setCallContact(null); }}
+          />
+        )}
         {screen === "chat" && activeChat && (
           <ChatScreen
             chat={activeChat}
@@ -197,12 +208,17 @@ export default function Index() {
             onSend={sendMessage}
             onBack={() => setScreen("chats")}
             onGroupSettings={activeChat.isGroup ? () => setScreen("group-settings") : undefined}
+            onCall={(video) => {
+              setCallContact(activeChat);
+              setIsVideoCall(video);
+              setScreen("call");
+            }}
           />
         )}
       </div>
 
       {/* Bottom nav */}
-      {screen !== "chat" && screen !== "settings" && screen !== "create-group" && screen !== "group-settings" && (
+      {screen !== "chat" && screen !== "settings" && screen !== "create-group" && screen !== "group-settings" && screen !== "call" && (
         <div className="relative z-20 glass border-t border-white/5 px-4 pt-3 pb-6">
           <div className="flex items-center justify-around">
             {NAV_ITEMS.map(item => {
@@ -305,10 +321,11 @@ function ChatsScreen({ chats, onChatClick, onCreateGroup }: { chats: Chat[]; onC
 }
 
 /* ──────── CHAT SCREEN ──────── */
-function ChatScreen({ chat, messages, input, setInput, onSend, onBack, onGroupSettings }: {
+function ChatScreen({ chat, messages, input, setInput, onSend, onBack, onGroupSettings, onCall }: {
   chat: Chat; messages: Message[]; input: string;
   setInput: (v: string) => void; onSend: () => void; onBack: () => void;
   onGroupSettings?: () => void;
+  onCall?: (video: boolean) => void;
 }) {
   return (
     <div className="h-full flex flex-col screen">
@@ -337,10 +354,15 @@ function ChatScreen({ chat, messages, input, setInput, onSend, onBack, onGroupSe
             </div>
           </button>
           <div className="flex gap-1">
-            {!chat.isGroup && (
-              <button className="w-9 h-9 flex items-center justify-center rounded-xl glass">
-                <Icon name="Phone" size={16} className="text-purple-400" />
-              </button>
+            {!chat.isGroup && onCall && (
+              <>
+                <button onClick={() => onCall(false)} className="w-9 h-9 flex items-center justify-center rounded-xl glass">
+                  <Icon name="Phone" size={16} className="text-purple-400" />
+                </button>
+                <button onClick={() => onCall(true)} className="w-9 h-9 flex items-center justify-center rounded-xl glass">
+                  <Icon name="Video" size={16} className="text-cyan-400" />
+                </button>
+              </>
             )}
             {chat.isGroup && onGroupSettings && (
               <button onClick={onGroupSettings} className="w-9 h-9 flex items-center justify-center rounded-xl glass">
@@ -1322,6 +1344,195 @@ function GroupSettingsScreen({ chat, members, onBack, onUpdateMembers, onUpdateC
                 </button>
               </div>
             </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ──────── CALL SCREEN ──────── */
+function CallScreen({ chat, isVideo, onEnd }: {
+  chat: Chat;
+  isVideo: boolean;
+  onEnd: () => void;
+}) {
+  const [callState, setCallState] = useState<CallState>("calling");
+  const [seconds, setSeconds] = useState(0);
+  const [muted, setMuted] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(true);
+  const [videoOn, setVideoOn] = useState(isVideo);
+
+  useEffect(() => {
+    const connectTimer = setTimeout(() => setCallState("connected"), 3000);
+    return () => clearTimeout(connectTimer);
+  }, []);
+
+  useEffect(() => {
+    if (callState !== "connected") return;
+    const t = setInterval(() => setSeconds(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [callState]);
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  };
+
+  const handleEnd = () => {
+    setCallState("ended");
+    setTimeout(onEnd, 800);
+  };
+
+  return (
+    <div className="h-full flex flex-col call-bg relative overflow-hidden screen">
+      {/* Ambient orbs */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-[-80px] left-[-80px] w-80 h-80 rounded-full opacity-25 animate-orb"
+          style={{ background: "radial-gradient(circle, #a855f7, transparent 65%)" }} />
+        <div className="absolute bottom-0 right-[-60px] w-72 h-72 rounded-full opacity-20 animate-orb"
+          style={{ background: "radial-gradient(circle, #6366f1, transparent 65%)", animationDelay: "4s" }} />
+        {isVideo && (
+          <div className="absolute inset-0 opacity-10"
+            style={{ background: "linear-gradient(135deg, #0f0b1e, #1a1040, #0d1a2e)" }} />
+        )}
+      </div>
+
+      {/* Header */}
+      <div className="relative z-10 flex items-center justify-between px-5 pt-14 pb-4">
+        <button onClick={onEnd} className="w-9 h-9 rounded-xl glass flex items-center justify-center">
+          <Icon name="ChevronDown" size={20} className="text-white/60" />
+        </button>
+        <div className="text-center">
+          <p className="text-white/40 text-xs font-medium uppercase tracking-widest">
+            {isVideo ? "Видеозвонок" : "Голосовой звонок"}
+          </p>
+        </div>
+        <button className="w-9 h-9 rounded-xl glass flex items-center justify-center">
+          <Icon name="MoreHorizontal" size={18} className="text-white/60" />
+        </button>
+      </div>
+
+      {/* Avatar + status */}
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-6">
+        {/* Pulse rings */}
+        <div className="relative flex items-center justify-center">
+          {callState === "calling" && (
+            <>
+              <div className="absolute w-32 h-32 rounded-full animate-call-ring-1"
+                style={{ background: "rgba(168,85,247,0.15)" }} />
+              <div className="absolute w-32 h-32 rounded-full animate-call-ring-2"
+                style={{ background: "rgba(168,85,247,0.12)" }} />
+              <div className="absolute w-32 h-32 rounded-full animate-call-ring-3"
+                style={{ background: "rgba(168,85,247,0.08)" }} />
+            </>
+          )}
+          {callState === "connected" && (
+            <>
+              <div className="absolute w-32 h-32 rounded-full animate-pulse-ring" />
+            </>
+          )}
+
+          {/* Avatar */}
+          <div className={`w-32 h-32 rounded-[2.5rem] ${chat.avatar} flex items-center justify-center text-white text-5xl font-bold relative z-10`}
+            style={{ boxShadow: "0 0 60px rgba(168,85,247,0.4), 0 0 120px rgba(168,85,247,0.15)" }}>
+            {chat.isGroup
+              ? <Icon name="Users" size={52} className="text-white/90" />
+              : chat.name.charAt(0)
+            }
+          </div>
+        </div>
+
+        {/* Name & status */}
+        <div className="text-center">
+          <h2 className="font-display text-2xl font-bold text-white mb-2">{chat.name}</h2>
+          {callState === "calling" && (
+            <div className="flex items-center gap-1.5 justify-center">
+              <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-typing" style={{ animationDelay: "0s" }} />
+              <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-typing" style={{ animationDelay: "0.2s" }} />
+              <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-typing" style={{ animationDelay: "0.4s" }} />
+              <span className="text-white/50 text-sm ml-1">Вызов...</span>
+            </div>
+          )}
+          {callState === "connected" && (
+            <div className="flex items-center gap-2 justify-center">
+              <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+              <span className="text-green-400 text-sm font-mono font-medium">{formatTime(seconds)}</span>
+            </div>
+          )}
+          {callState === "ended" && (
+            <span className="text-red-400 text-sm">Звонок завершён</span>
+          )}
+        </div>
+
+        {/* Secondary controls */}
+        {callState === "connected" && (
+          <div className="flex gap-4 mt-2">
+            {[
+              { icon: muted ? "MicOff" : "Mic", label: muted ? "Выкл" : "Микр.", active: !muted, action: () => setMuted(m => !m) },
+              { icon: speakerOn ? "Volume2" : "VolumeX", label: "Динамик", active: speakerOn, action: () => setSpeakerOn(s => !s) },
+              ...(isVideo ? [{ icon: videoOn ? "Video" : "VideoOff", label: "Камера", active: videoOn, action: () => setVideoOn(v => !v) }] : []),
+              { icon: "MessageCircle", label: "Чат", active: false, action: onEnd },
+            ].map(btn => (
+              <button key={btn.icon} onClick={btn.action}
+                className="flex flex-col items-center gap-2">
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all active:scale-90 ${btn.active
+                  ? "bg-white/10 border border-white/15"
+                  : "bg-white/5 border border-white/8"
+                  }`}>
+                  <Icon name={btn.icon} size={22} className={btn.active ? "text-white" : "text-white/30"} />
+                </div>
+                <span className={`text-xs ${btn.active ? "text-white/50" : "text-white/20"}`}>{btn.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Video preview placeholder */}
+        {isVideo && videoOn && callState === "connected" && (
+          <div className="w-28 h-40 rounded-2xl overflow-hidden border border-white/10 absolute bottom-44 right-6"
+            style={{ background: "linear-gradient(135deg,#1e1040,#0d1a2e)" }}>
+            <div className="w-full h-full flex items-center justify-center">
+              <div className="text-center">
+                <Icon name="Video" size={24} className="text-white/20 mx-auto mb-1" />
+                <span className="text-white/20 text-[10px]">Камера</span>
+              </div>
+            </div>
+            <div className="absolute bottom-2 right-2">
+              <button onClick={() => setVideoOn(false)} className="w-7 h-7 rounded-lg bg-black/40 flex items-center justify-center">
+                <Icon name="VideoOff" size={13} className="text-white/60" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Main action buttons */}
+      <div className="relative z-10 px-8 pb-16">
+        {callState === "calling" ? (
+          <div className="flex items-center justify-center gap-12">
+            <div className="flex flex-col items-center gap-2">
+              <button onClick={handleEnd}
+                className="w-18 h-18 w-[72px] h-[72px] rounded-full call-btn-end flex items-center justify-center transition-transform active:scale-90">
+                <Icon name="PhoneOff" size={28} className="text-white" />
+              </button>
+              <span className="text-white/40 text-xs">Отклонить</span>
+            </div>
+          </div>
+        ) : callState === "connected" ? (
+          <div className="flex items-center justify-center">
+            <div className="flex flex-col items-center gap-2">
+              <button onClick={handleEnd}
+                className="w-[72px] h-[72px] rounded-full call-btn-end flex items-center justify-center transition-transform active:scale-90">
+                <Icon name="PhoneOff" size={28} className="text-white" />
+              </button>
+              <span className="text-white/40 text-xs">Завершить</span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center">
+            <span className="text-white/30 text-sm">Закрытие...</span>
           </div>
         )}
       </div>
