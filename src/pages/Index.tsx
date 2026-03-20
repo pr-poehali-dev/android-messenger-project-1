@@ -1,7 +1,14 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
 
-type Screen = "chats" | "contacts" | "profile" | "settings" | "search" | "notifications" | "chat";
+type Screen = "chats" | "contacts" | "profile" | "settings" | "search" | "notifications" | "chat" | "create-group";
+
+type MemberRole = "admin" | "moderator" | "member";
+
+interface GroupMember {
+  contact: Contact;
+  role: MemberRole;
+}
 
 interface Message {
   id: number;
@@ -85,6 +92,7 @@ export default function Index() {
   const [messages, setMessages] = useState<Message[]>(MESSAGES);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"chats" | "contacts">("chats");
+  const [chats, setChats] = useState<Chat[]>(CHATS);
 
   const navigate = (s: Screen) => {
     setScreen(s);
@@ -108,7 +116,23 @@ export default function Index() {
     setMsgInput("");
   };
 
-  const totalUnread = CHATS.reduce((a, c) => a + c.unread, 0);
+  const handleGroupCreate = (name: string, members: GroupMember[]) => {
+    const newGroup: Chat = {
+      id: chats.length + 1,
+      name,
+      avatar: `avatar-grad-${(chats.length % 6) + 1}`,
+      lastMsg: "Группа создана",
+      time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }),
+      unread: 0,
+      online: false,
+      isGroup: true,
+      members: members.length + 1,
+    };
+    setChats(prev => [newGroup, ...prev]);
+    setScreen("chats");
+  };
+
+  const totalUnread = chats.reduce((a, c) => a + c.unread, 0);
   const notifUnread = NOTIFICATIONS.filter(n => n.unread).length;
 
   return (
@@ -125,7 +149,8 @@ export default function Index() {
 
       {/* Content */}
       <div className="flex-1 overflow-hidden relative z-10">
-        {screen === "chats" && <ChatsScreen chats={CHATS} onChatClick={openChat} />}
+        {screen === "chats" && <ChatsScreen chats={chats} onChatClick={openChat} onCreateGroup={() => setScreen("create-group")} />}
+        {screen === "create-group" && <CreateGroupScreen contacts={CONTACTS} onBack={() => setScreen("chats")} onCreate={handleGroupCreate} />}
         {screen === "contacts" && <ContactsScreen contacts={CONTACTS} onChatClick={(c) => {
           const chat = CHATS.find(ch => ch.name === c.name);
           if (chat) openChat(chat);
@@ -157,7 +182,7 @@ export default function Index() {
       </div>
 
       {/* Bottom nav */}
-      {screen !== "chat" && screen !== "settings" && (
+      {screen !== "chat" && screen !== "settings" && screen !== "create-group" && (
         <div className="relative z-20 glass border-t border-white/5 px-4 pt-3 pb-6">
           <div className="flex items-center justify-around">
             {NAV_ITEMS.map(item => {
@@ -196,7 +221,7 @@ export default function Index() {
 }
 
 /* ──────── CHATS SCREEN ──────── */
-function ChatsScreen({ chats, onChatClick }: { chats: Chat[]; onChatClick: (c: Chat) => void }) {
+function ChatsScreen({ chats, onChatClick, onCreateGroup }: { chats: Chat[]; onChatClick: (c: Chat) => void; onCreateGroup: () => void }) {
   return (
     <div className="h-full flex flex-col screen">
       <div className="px-5 pt-12 pb-4">
@@ -207,8 +232,8 @@ function ChatsScreen({ chats, onChatClick }: { chats: Chat[]; onChatClick: (c: C
               {chats.filter(c => c.unread > 0).length} непрочитанных чатов
             </p>
           </div>
-          <button className="w-10 h-10 rounded-2xl glass flex items-center justify-center">
-            <Icon name="Plus" size={18} className="text-purple-400" />
+          <button onClick={onCreateGroup} className="w-10 h-10 rounded-2xl glass flex items-center justify-center group">
+            <Icon name="Plus" size={18} className="text-purple-400 group-active:scale-90 transition-transform" />
           </button>
         </div>
       </div>
@@ -694,6 +719,294 @@ function SettingsScreen({ onBack }: { onBack: () => void }) {
         </div>
 
         <p className="text-center text-white/15 text-xs pb-2">Pulse v1.0.0 · Made with 🚀</p>
+      </div>
+    </div>
+  );
+}
+
+/* ──────── CREATE GROUP SCREEN ──────── */
+const ROLE_CONFIG: Record<MemberRole, { label: string; color: string; bg: string; icon: string; desc: string }> = {
+  admin: { label: "Администратор", color: "text-purple-400", bg: "bg-purple-500/15 border-purple-500/30", icon: "Shield", desc: "Полный доступ" },
+  moderator: { label: "Модератор", color: "text-cyan-400", bg: "bg-cyan-500/15 border-cyan-500/30", icon: "Star", desc: "Управление участниками" },
+  member: { label: "Участник", color: "text-white/60", bg: "bg-white/5 border-white/10", icon: "User", desc: "Чтение и отправка" },
+};
+
+function CreateGroupScreen({ contacts, onBack, onCreate }: {
+  contacts: Contact[];
+  onBack: () => void;
+  onCreate: (name: string, members: GroupMember[]) => void;
+}) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [groupName, setGroupName] = useState("");
+  const [groupDesc, setGroupDesc] = useState("");
+  const [members, setMembers] = useState<GroupMember[]>([]);
+  const [editingRole, setEditingRole] = useState<number | null>(null);
+
+  const toggleContact = (contact: Contact) => {
+    setMembers(prev => {
+      const exists = prev.find(m => m.contact.id === contact.id);
+      if (exists) return prev.filter(m => m.contact.id !== contact.id);
+      return [...prev, { contact, role: "member" }];
+    });
+  };
+
+  const setRole = (contactId: number, role: MemberRole) => {
+    setMembers(prev => prev.map(m => m.contact.id === contactId ? { ...m, role } : m));
+    setEditingRole(null);
+  };
+
+  const isSelected = (id: number) => members.some(m => m.contact.id === id);
+
+  const canNext1 = groupName.trim().length >= 2;
+  const canNext2 = members.length >= 1;
+
+  return (
+    <div className="h-full flex flex-col screen">
+      {/* Header */}
+      <div className="px-5 pt-12 pb-4">
+        <div className="flex items-center gap-3 mb-6">
+          <button onClick={step === 1 ? onBack : () => setStep(s => (s - 1) as 1 | 2 | 3)}
+            className="w-9 h-9 flex items-center justify-center rounded-xl glass">
+            <Icon name="ChevronLeft" size={20} className="text-white/70" />
+          </button>
+          <div className="flex-1">
+            <h1 className="font-display text-xl font-bold text-white">Новая группа</h1>
+            <p className="text-white/30 text-xs">Шаг {step} из 3</p>
+          </div>
+        </div>
+
+        {/* Step indicators */}
+        <div className="flex gap-2 mb-6">
+          {[1, 2, 3].map(s => (
+            <div key={s} className={`h-1 flex-1 rounded-full transition-all duration-500 ${step >= s
+              ? "opacity-100"
+              : "opacity-20 bg-white/20"
+              }`}
+              style={step >= s ? { background: "linear-gradient(135deg,#a855f7,#6366f1)" } : {}} />
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-5 pb-4">
+
+        {/* ── Step 1: Group info ── */}
+        {step === 1 && (
+          <div className="space-y-4 animate-slide-up">
+            <p className="text-white/50 text-sm mb-6">Введите название и описание группы</p>
+
+            {/* Avatar picker */}
+            <div className="flex flex-col items-center gap-3 mb-6">
+              <div className="w-24 h-24 rounded-3xl avatar-grad-2 flex items-center justify-center relative glow-purple">
+                <Icon name="Users" size={36} className="text-white/90" />
+                <div className="absolute -bottom-1 -right-1 w-8 h-8 rounded-xl flex items-center justify-center"
+                  style={{ background: "linear-gradient(135deg,#a855f7,#6366f1)" }}>
+                  <Icon name="Camera" size={14} className="text-white" />
+                </div>
+              </div>
+              <p className="text-white/30 text-xs">Нажмите для смены фото</p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="glass rounded-2xl px-4 py-1 flex items-center gap-3">
+                <Icon name="Hash" size={16} className="text-purple-400 flex-shrink-0" />
+                <input
+                  value={groupName}
+                  onChange={e => setGroupName(e.target.value)}
+                  placeholder="Название группы*"
+                  maxLength={50}
+                  className="flex-1 bg-transparent text-white text-sm placeholder-white/25 outline-none py-3"
+                />
+                <span className="text-white/20 text-xs">{groupName.length}/50</span>
+              </div>
+
+              <div className="glass rounded-2xl px-4 py-1 flex items-start gap-3">
+                <Icon name="AlignLeft" size={16} className="text-cyan-400 flex-shrink-0 mt-3.5" />
+                <textarea
+                  value={groupDesc}
+                  onChange={e => setGroupDesc(e.target.value)}
+                  placeholder="Описание группы (необязательно)"
+                  rows={3}
+                  className="flex-1 bg-transparent text-white text-sm placeholder-white/25 outline-none py-3 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Group type */}
+            <div className="mt-4">
+              <p className="text-xs font-semibold text-white/30 uppercase tracking-wider mb-3">Тип группы</p>
+              <div className="glass rounded-2xl overflow-hidden divide-y divide-white/5">
+                {[
+                  { icon: "Globe", label: "Публичная", desc: "Любой может найти и вступить", color: "text-green-400" },
+                  { icon: "Lock", label: "Приватная", desc: "Только по приглашению", color: "text-orange-400" },
+                ].map((t, i) => (
+                  <label key={t.label} className="flex items-center gap-3 px-4 py-4 cursor-pointer">
+                    <Icon name={t.icon} size={18} className={t.color} />
+                    <div className="flex-1">
+                      <div className="text-white text-sm font-medium">{t.label}</div>
+                      <div className="text-white/30 text-xs">{t.desc}</div>
+                    </div>
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${i === 1 ? "border-purple-400" : "border-white/20"}`}>
+                      {i === 1 && <div className="w-2.5 h-2.5 rounded-full bg-purple-400" />}
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 2: Add members ── */}
+        {step === 2 && (
+          <div className="animate-slide-up">
+            <p className="text-white/50 text-sm mb-4">Выберите участников группы</p>
+
+            {members.length > 0 && (
+              <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
+                {members.map(m => (
+                  <div key={m.contact.id} className="flex flex-col items-center gap-1 flex-shrink-0">
+                    <div className="relative">
+                      <div className={`w-12 h-12 rounded-2xl ${m.contact.avatar} flex items-center justify-center text-white font-bold text-sm`}>
+                        {m.contact.name.charAt(0)}
+                      </div>
+                      <button onClick={() => toggleContact(m.contact)}
+                        className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center">
+                        <Icon name="X" size={10} className="text-white" />
+                      </button>
+                    </div>
+                    <span className="text-white/50 text-[10px] w-12 text-center truncate">{m.contact.name.split(" ")[0]}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="space-y-1">
+              {contacts.map(contact => (
+                <button key={contact.id} onClick={() => toggleContact(contact)}
+                  className={`w-full flex items-center gap-3 px-3 py-3 rounded-2xl transition-all text-left ${isSelected(contact.id) ? "glass border border-purple-500/20" : "hover:bg-white/4"}`}>
+                  <div className="relative flex-shrink-0">
+                    <div className={`w-11 h-11 rounded-xl ${contact.avatar} flex items-center justify-center text-white font-bold`}>
+                      {contact.name.charAt(0)}
+                    </div>
+                    {contact.online && <div className="absolute -bottom-0.5 -right-0.5 online-dot" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-white text-sm">{contact.name}</div>
+                    <div className="text-white/40 text-xs">{contact.status}</div>
+                  </div>
+                  <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isSelected(contact.id) ? "border-transparent" : "border-white/20"}`}
+                    style={isSelected(contact.id) ? { background: "linear-gradient(135deg,#a855f7,#6366f1)" } : {}}>
+                    {isSelected(contact.id) && <Icon name="Check" size={12} className="text-white" />}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 3: Assign roles ── */}
+        {step === 3 && (
+          <div className="animate-slide-up space-y-4">
+            <p className="text-white/50 text-sm">Назначьте роли участникам группы</p>
+
+            {/* Role legend */}
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              {(Object.entries(ROLE_CONFIG) as [MemberRole, typeof ROLE_CONFIG[MemberRole]][]).map(([role, cfg]) => (
+                <div key={role} className={`rounded-2xl p-3 border ${cfg.bg} text-center`}>
+                  <Icon name={cfg.icon} size={16} className={`${cfg.color} mx-auto mb-1`} />
+                  <div className={`text-xs font-semibold ${cfg.color}`}>{cfg.label}</div>
+                  <div className="text-white/30 text-[10px] mt-0.5">{cfg.desc}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Member list with role picker */}
+            <div className="space-y-2">
+              {members.map(m => {
+                const cfg = ROLE_CONFIG[m.role];
+                return (
+                  <div key={m.contact.id} className="glass rounded-2xl overflow-hidden">
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <div className={`w-10 h-10 rounded-xl ${m.contact.avatar} flex items-center justify-center text-white font-bold text-sm flex-shrink-0`}>
+                        {m.contact.name.charAt(0)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-white text-sm">{m.contact.name}</div>
+                        <div className="text-white/30 text-xs">{m.contact.status}</div>
+                      </div>
+                      <button
+                        onClick={() => setEditingRole(editingRole === m.contact.id ? null : m.contact.id)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${cfg.bg} ${cfg.color}`}
+                      >
+                        <Icon name={cfg.icon} size={12} className={cfg.color} />
+                        {cfg.label}
+                        <Icon name={editingRole === m.contact.id ? "ChevronUp" : "ChevronDown"} size={12} className={cfg.color} />
+                      </button>
+                    </div>
+
+                    {/* Role dropdown */}
+                    {editingRole === m.contact.id && (
+                      <div className="border-t border-white/5 divide-y divide-white/5 animate-slide-up">
+                        {(Object.entries(ROLE_CONFIG) as [MemberRole, typeof ROLE_CONFIG[MemberRole]][]).map(([role, rcfg]) => (
+                          <button key={role} onClick={() => setRole(m.contact.id, role)}
+                            className={`w-full flex items-center gap-3 px-4 py-3 transition-all text-left ${m.role === role ? "bg-white/5" : "hover:bg-white/3"}`}>
+                            <Icon name={rcfg.icon} size={15} className={rcfg.color} />
+                            <div className="flex-1">
+                              <div className={`text-sm font-medium ${rcfg.color}`}>{rcfg.label}</div>
+                              <div className="text-white/30 text-xs">{rcfg.desc}</div>
+                            </div>
+                            {m.role === role && <Icon name="Check" size={14} className="text-purple-400" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Summary */}
+            <div className="glass rounded-2xl px-4 py-4 mt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Icon name="Users" size={16} className="text-purple-400" />
+                <span className="text-white font-semibold text-sm">«{groupName}»</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {(["admin", "moderator", "member"] as MemberRole[]).map(role => {
+                  const count = members.filter(m => m.role === role).length;
+                  const cfg = ROLE_CONFIG[role];
+                  return (
+                    <div key={role}>
+                      <div className={`text-lg font-bold ${cfg.color}`}>{count}</div>
+                      <div className="text-white/30 text-xs">{cfg.label}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom button */}
+      <div className="px-5 pb-8 pt-3">
+        {step < 3 ? (
+          <button
+            onClick={() => setStep(s => (s + 1) as 1 | 2 | 3)}
+            disabled={step === 1 ? !canNext1 : !canNext2}
+            className="w-full py-4 rounded-2xl text-white font-semibold text-sm transition-all active:scale-95 disabled:opacity-30"
+            style={{ background: "linear-gradient(135deg,#a855f7,#6366f1)" }}
+          >
+            {step === 1 ? "Выбрать участников" : `Назначить роли (${members.length})`}
+          </button>
+        ) : (
+          <button
+            onClick={() => onCreate(groupName, members)}
+            className="w-full py-4 rounded-2xl text-white font-semibold text-sm transition-all active:scale-95 glow-purple"
+            style={{ background: "linear-gradient(135deg,#a855f7,#6366f1)" }}
+          >
+            Создать группу 🚀
+          </button>
+        )}
       </div>
     </div>
   );
