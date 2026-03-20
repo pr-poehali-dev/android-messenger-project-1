@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Icon from "@/components/ui/icon";
 
 type Screen = "chats" | "contacts" | "profile" | "settings" | "search" | "notifications" | "chat" | "create-group" | "group-settings" | "call";
@@ -18,6 +18,7 @@ interface Message {
   out: boolean;
   time: string;
   read?: boolean;
+  image?: string;
 }
 
 interface Chat {
@@ -127,6 +128,17 @@ export default function Index() {
     setMsgInput("");
   };
 
+  const sendImage = (dataUrl: string) => {
+    setMessages(prev => [...prev, {
+      id: prev.length + 1,
+      text: "",
+      out: true,
+      time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }),
+      read: false,
+      image: dataUrl,
+    }]);
+  };
+
   const handleGroupCreate = (name: string, members: GroupMember[]) => {
     const newGroup: Chat = {
       id: chats.length + 1,
@@ -206,6 +218,7 @@ export default function Index() {
             input={msgInput}
             setInput={setMsgInput}
             onSend={sendMessage}
+            onSendImage={sendImage}
             onBack={() => setScreen("chats")}
             onGroupSettings={activeChat.isGroup ? () => setScreen("group-settings") : undefined}
             onCall={(video) => {
@@ -321,14 +334,38 @@ function ChatsScreen({ chats, onChatClick, onCreateGroup }: { chats: Chat[]; onC
 }
 
 /* ──────── CHAT SCREEN ──────── */
-function ChatScreen({ chat, messages, input, setInput, onSend, onBack, onGroupSettings, onCall }: {
+function ChatScreen({ chat, messages, input, setInput, onSend, onSendImage, onBack, onGroupSettings, onCall }: {
   chat: Chat; messages: Message[]; input: string;
-  setInput: (v: string) => void; onSend: () => void; onBack: () => void;
+  setInput: (v: string) => void; onSend: () => void; onSendImage: (url: string) => void; onBack: () => void;
   onGroupSettings?: () => void;
   onCall?: (video: boolean) => void;
 }) {
+  const [showMediaPanel, setShowMediaPanel] = useState(false);
+  const [previewImg, setPreviewImg] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result as string;
+      setPreviewImg(result);
+      setShowMediaPanel(false);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const confirmSendImage = () => {
+    if (previewImg) {
+      onSendImage(previewImg);
+      setPreviewImg(null);
+    }
+  };
+
   return (
-    <div className="h-full flex flex-col screen">
+    <div className="h-full flex flex-col screen relative">
       <div className="glass border-b border-white/5 px-4 pt-12 pb-3">
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="w-9 h-9 flex items-center justify-center rounded-xl glass">
@@ -376,23 +413,54 @@ function ChatScreen({ chat, messages, input, setInput, onSend, onBack, onGroupSe
         </div>
       </div>
 
+      {/* Image preview modal */}
+      {previewImg && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full px-5 flex flex-col items-center gap-4">
+            <p className="text-white/60 text-sm">Отправить изображение?</p>
+            <div className="w-full max-h-[60vh] rounded-2xl overflow-hidden border border-white/10">
+              <img src={previewImg} alt="preview" className="w-full h-full object-contain" style={{ maxHeight: "60vh" }} />
+            </div>
+            <div className="flex gap-3 w-full">
+              <button onClick={() => setPreviewImg(null)}
+                className="flex-1 py-3 rounded-2xl glass text-white/60 text-sm font-medium">
+                Отмена
+              </button>
+              <button onClick={confirmSendImage}
+                className="flex-1 py-3 rounded-2xl text-white text-sm font-semibold glow-purple"
+                style={{ background: "linear-gradient(135deg,#a855f7,#6366f1)" }}>
+                Отправить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.map((msg, i) => (
           <div key={msg.id} className={`flex ${msg.out ? "justify-end" : "justify-start"} animate-fade-in`}
             style={{ animationDelay: `${i * 30}ms` }}>
-            <div className={`max-w-[75%] px-4 py-2.5 ${msg.out ? "bubble-out" : "bubble-in"}`}>
-              <p className="text-white text-sm leading-relaxed">{msg.text}</p>
-              <div className={`flex items-center gap-1 mt-1 ${msg.out ? "justify-end" : "justify-start"}`}>
-                <span className="text-[10px] text-white/40">{msg.time}</span>
-                {msg.out && (
-                  <Icon
-                    name={msg.read ? "CheckCheck" : "Check"}
-                    size={12}
-                    className={msg.read ? "text-cyan-400" : "text-white/30"}
-                  />
-                )}
+            {msg.image ? (
+              <div className={`max-w-[75%] overflow-hidden rounded-2xl border ${msg.out ? "border-purple-500/20" : "border-white/8"}`}>
+                <img src={msg.image} alt="фото" className="w-full object-cover" style={{ maxHeight: 280 }} />
+                <div className={`flex items-center gap-1 px-3 py-1.5 ${msg.out ? "justify-end bg-purple-900/30" : "justify-start bg-white/5"}`}>
+                  <span className="text-[10px] text-white/40">{msg.time}</span>
+                  {msg.out && (
+                    <Icon name={msg.read ? "CheckCheck" : "Check"} size={12} className={msg.read ? "text-cyan-400" : "text-white/30"} />
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className={`max-w-[75%] px-4 py-2.5 ${msg.out ? "bubble-out" : "bubble-in"}`}>
+                <p className="text-white text-sm leading-relaxed">{msg.text}</p>
+                <div className={`flex items-center gap-1 mt-1 ${msg.out ? "justify-end" : "justify-start"}`}>
+                  <span className="text-[10px] text-white/40">{msg.time}</span>
+                  {msg.out && (
+                    <Icon name={msg.read ? "CheckCheck" : "Check"} size={12} className={msg.read ? "text-cyan-400" : "text-white/30"} />
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         ))}
 
@@ -406,10 +474,44 @@ function ChatScreen({ chat, messages, input, setInput, onSend, onBack, onGroupSe
         </div>
       </div>
 
+      {/* Media panel */}
+      {showMediaPanel && (
+        <div className="glass border-t border-white/5 px-4 pt-3 pb-2 animate-slide-up">
+          <div className="flex gap-3 mb-3">
+            {[
+              { icon: "Image", label: "Галерея", action: () => fileInputRef.current?.click() },
+              { icon: "Camera", label: "Камера", action: () => fileInputRef.current?.click() },
+              { icon: "File", label: "Файл", action: () => fileInputRef.current?.click() },
+              { icon: "MapPin", label: "Геолокация", action: () => setShowMediaPanel(false) },
+            ].map(item => (
+              <button key={item.label} onClick={item.action}
+                className="flex flex-col items-center gap-1.5 flex-1">
+                <div className="w-13 h-13 w-[52px] h-[52px] rounded-2xl glass flex items-center justify-center"
+                  style={{ background: "linear-gradient(135deg,rgba(168,85,247,0.15),rgba(99,102,241,0.15))", border: "1px solid rgba(168,85,247,0.2)" }}>
+                  <Icon name={item.icon} size={22} className="text-purple-400" />
+                </div>
+                <span className="text-white/40 text-[10px]">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="glass border-t border-white/5 px-4 pt-3 pb-8">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileChange}
+        />
         <div className="flex items-end gap-2">
-          <button className="w-10 h-10 flex items-center justify-center rounded-xl glass flex-shrink-0">
-            <Icon name="Paperclip" size={18} className="text-white/40" />
+          <button
+            onClick={() => setShowMediaPanel(v => !v)}
+            className={`w-10 h-10 flex items-center justify-center rounded-xl flex-shrink-0 transition-all ${showMediaPanel ? "glow-purple" : "glass"}`}
+            style={showMediaPanel ? { background: "linear-gradient(135deg,#a855f7,#6366f1)" } : {}}
+          >
+            <Icon name={showMediaPanel ? "X" : "Plus"} size={18} className={showMediaPanel ? "text-white" : "text-white/50"} />
           </button>
           <div className="flex-1 glass rounded-2xl px-4 py-2.5 flex items-end gap-2">
             <textarea
@@ -421,8 +523,8 @@ function ChatScreen({ chat, messages, input, setInput, onSend, onBack, onGroupSe
               className="flex-1 bg-transparent text-white text-sm placeholder-white/25 outline-none resize-none"
               style={{ maxHeight: 100 }}
             />
-            <button className="w-7 h-7 flex items-center justify-center rounded-lg flex-shrink-0">
-              <Icon name="Smile" size={18} className="text-white/30" />
+            <button onClick={() => fileInputRef.current?.click()} className="w-7 h-7 flex items-center justify-center rounded-lg flex-shrink-0">
+              <Icon name="Image" size={17} className="text-white/30" />
             </button>
           </div>
           <button
