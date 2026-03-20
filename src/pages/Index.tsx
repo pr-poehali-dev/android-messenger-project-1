@@ -1,7 +1,7 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
 
-type Screen = "chats" | "contacts" | "profile" | "settings" | "search" | "notifications" | "chat" | "create-group";
+type Screen = "chats" | "contacts" | "profile" | "settings" | "search" | "notifications" | "chat" | "create-group" | "group-settings";
 
 type MemberRole = "admin" | "moderator" | "member";
 
@@ -93,6 +93,13 @@ export default function Index() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"chats" | "contacts">("chats");
   const [chats, setChats] = useState<Chat[]>(CHATS);
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([
+    { contact: CONTACTS[0], role: "admin" },
+    { contact: CONTACTS[1], role: "moderator" },
+    { contact: CONTACTS[2], role: "member" },
+    { contact: CONTACTS[3], role: "member" },
+    { contact: CONTACTS[4], role: "member" },
+  ]);
 
   const navigate = (s: Screen) => {
     setScreen(s);
@@ -169,6 +176,18 @@ export default function Index() {
         {screen === "notifications" && <NotificationsScreen notifications={NOTIFICATIONS} />}
         {screen === "profile" && <ProfileScreen onSettings={() => setScreen("settings")} />}
         {screen === "settings" && <SettingsScreen onBack={() => setScreen("profile")} />}
+        {screen === "group-settings" && activeChat && (
+          <GroupSettingsScreen
+            chat={activeChat}
+            members={groupMembers}
+            onBack={() => setScreen("chat")}
+            onUpdateMembers={setGroupMembers}
+            onUpdateChat={(updated) => {
+              setChats(prev => prev.map(c => c.id === updated.id ? updated : c));
+              setActiveChat(updated);
+            }}
+          />
+        )}
         {screen === "chat" && activeChat && (
           <ChatScreen
             chat={activeChat}
@@ -177,12 +196,13 @@ export default function Index() {
             setInput={setMsgInput}
             onSend={sendMessage}
             onBack={() => setScreen("chats")}
+            onGroupSettings={activeChat.isGroup ? () => setScreen("group-settings") : undefined}
           />
         )}
       </div>
 
       {/* Bottom nav */}
-      {screen !== "chat" && screen !== "settings" && screen !== "create-group" && (
+      {screen !== "chat" && screen !== "settings" && screen !== "create-group" && screen !== "group-settings" && (
         <div className="relative z-20 glass border-t border-white/5 px-4 pt-3 pb-6">
           <div className="flex items-center justify-around">
             {NAV_ITEMS.map(item => {
@@ -285,9 +305,10 @@ function ChatsScreen({ chats, onChatClick, onCreateGroup }: { chats: Chat[]; onC
 }
 
 /* ──────── CHAT SCREEN ──────── */
-function ChatScreen({ chat, messages, input, setInput, onSend, onBack }: {
+function ChatScreen({ chat, messages, input, setInput, onSend, onBack, onGroupSettings }: {
   chat: Chat; messages: Message[]; input: string;
   setInput: (v: string) => void; onSend: () => void; onBack: () => void;
+  onGroupSettings?: () => void;
 }) {
   return (
     <div className="h-full flex flex-col screen">
@@ -296,27 +317,36 @@ function ChatScreen({ chat, messages, input, setInput, onSend, onBack }: {
           <button onClick={onBack} className="w-9 h-9 flex items-center justify-center rounded-xl glass">
             <Icon name="ChevronLeft" size={20} className="text-white/70" />
           </button>
-          <div className={`w-10 h-10 rounded-xl ${chat.avatar} flex items-center justify-center text-white font-bold`}>
-            {chat.isGroup
-              ? <Icon name="Users" size={16} className="text-white/90" />
-              : chat.name.charAt(0)
-            }
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold text-white text-sm">{chat.name}</div>
-            <div className="text-xs">
+          <button onClick={onGroupSettings} disabled={!onGroupSettings} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+            <div className={`w-10 h-10 rounded-xl ${chat.avatar} flex items-center justify-center text-white font-bold flex-shrink-0`}>
               {chat.isGroup
-                ? <span className="text-white/40">{chat.members} участников</span>
-                : chat.online
-                  ? <span className="text-green-400">онлайн</span>
-                  : <span className="text-white/40">был(а) давно</span>
+                ? <Icon name="Users" size={16} className="text-white/90" />
+                : chat.name.charAt(0)
               }
             </div>
-          </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-white text-sm">{chat.name}</div>
+              <div className="text-xs">
+                {chat.isGroup
+                  ? <span className="text-white/40">{chat.members} участников · нажмите для настроек</span>
+                  : chat.online
+                    ? <span className="text-green-400">онлайн</span>
+                    : <span className="text-white/40">был(а) давно</span>
+                }
+              </div>
+            </div>
+          </button>
           <div className="flex gap-1">
-            <button className="w-9 h-9 flex items-center justify-center rounded-xl glass">
-              <Icon name="Phone" size={16} className="text-purple-400" />
-            </button>
+            {!chat.isGroup && (
+              <button className="w-9 h-9 flex items-center justify-center rounded-xl glass">
+                <Icon name="Phone" size={16} className="text-purple-400" />
+              </button>
+            )}
+            {chat.isGroup && onGroupSettings && (
+              <button onClick={onGroupSettings} className="w-9 h-9 flex items-center justify-center rounded-xl glass">
+                <Icon name="Settings2" size={16} className="text-purple-400" />
+              </button>
+            )}
             <button className="w-9 h-9 flex items-center justify-center rounded-xl glass">
               <Icon name="MoreVertical" size={16} className="text-white/50" />
             </button>
@@ -1006,6 +1036,293 @@ function CreateGroupScreen({ contacts, onBack, onCreate }: {
           >
             Создать группу 🚀
           </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ──────── GROUP SETTINGS SCREEN ──────── */
+function GroupSettingsScreen({ chat, members, onBack, onUpdateMembers, onUpdateChat }: {
+  chat: Chat;
+  members: GroupMember[];
+  onBack: () => void;
+  onUpdateMembers: (m: GroupMember[]) => void;
+  onUpdateChat: (c: Chat) => void;
+}) {
+  const [activeTab, setActiveTab] = useState<"members" | "settings" | "permissions">("members");
+  const [editingRole, setEditingRole] = useState<number | null>(null);
+  const [kickConfirm, setKickConfirm] = useState<number | null>(null);
+  const [groupName, setGroupName] = useState(chat.name);
+  const [perms, setPerms] = useState({
+    membersCanInvite: true,
+    membersCanEdit: false,
+    membersCanPin: false,
+    onlyAdminsPost: false,
+    slowMode: false,
+  });
+
+  const togglePerm = (k: keyof typeof perms) => setPerms(p => ({ ...p, [k]: !p[k] }));
+
+  const setRole = (contactId: number, role: MemberRole) => {
+    onUpdateMembers(members.map(m => m.contact.id === contactId ? { ...m, role } : m));
+    setEditingRole(null);
+  };
+
+  const kickMember = (contactId: number) => {
+    onUpdateMembers(members.filter(m => m.contact.id !== contactId));
+    setKickConfirm(null);
+    const newCount = (chat.members ?? 1) - 1;
+    onUpdateChat({ ...chat, members: newCount });
+  };
+
+  const saveGroupName = () => {
+    if (groupName.trim().length >= 2) {
+      onUpdateChat({ ...chat, name: groupName.trim() });
+    }
+  };
+
+  const admins = members.filter(m => m.role === "admin");
+  const mods = members.filter(m => m.role === "moderator");
+  const regular = members.filter(m => m.role === "member");
+
+  const TABS = [
+    { id: "members" as const, icon: "Users", label: "Участники" },
+    { id: "permissions" as const, icon: "Shield", label: "Права" },
+    { id: "settings" as const, icon: "Settings2", label: "Группа" },
+  ];
+
+  return (
+    <div className="h-full flex flex-col screen">
+      {/* Header */}
+      <div className="glass border-b border-white/5 px-5 pt-12 pb-0">
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={onBack} className="w-9 h-9 flex items-center justify-center rounded-xl glass">
+            <Icon name="ChevronLeft" size={20} className="text-white/70" />
+          </button>
+          <div className="flex-1">
+            <h1 className="font-display text-xl font-bold text-white">Настройки группы</h1>
+            <p className="text-white/30 text-xs">{chat.name} · {members.length} участников</p>
+          </div>
+        </div>
+        <div className="flex gap-1">
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-all ${activeTab === tab.id
+                ? "text-purple-400 border-b-2 border-purple-400"
+                : "text-white/30"
+                }`}
+            >
+              <Icon name={tab.icon} size={14} className={activeTab === tab.id ? "text-purple-400" : "text-white/30"} />
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto pb-4">
+
+        {/* ── MEMBERS TAB ── */}
+        {activeTab === "members" && (
+          <div className="px-4 pt-4 space-y-4 animate-slide-up">
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { count: admins.length, label: "Администрат.", color: "text-purple-400", bg: "bg-purple-500/10" },
+                { count: mods.length, label: "Модераторы", color: "text-cyan-400", bg: "bg-cyan-500/10" },
+                { count: regular.length, label: "Участники", color: "text-white/60", bg: "bg-white/5" },
+              ].map(s => (
+                <div key={s.label} className={`${s.bg} rounded-2xl p-3 text-center`}>
+                  <div className={`text-xl font-bold ${s.color}`}>{s.count}</div>
+                  <div className="text-white/30 text-[10px]">{s.label}</div>
+                </div>
+              ))}
+            </div>
+
+            <button className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border border-dashed border-purple-500/30 hover:border-purple-500/60 transition-all">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: "linear-gradient(135deg,rgba(168,85,247,0.2),rgba(99,102,241,0.2))" }}>
+                <Icon name="UserPlus" size={18} className="text-purple-400" />
+              </div>
+              <span className="text-purple-400 text-sm font-medium">Добавить участника</span>
+            </button>
+
+            {[
+              { role: "admin" as MemberRole, list: admins },
+              { role: "moderator" as MemberRole, list: mods },
+              { role: "member" as MemberRole, list: regular },
+            ].filter(g => g.list.length > 0).map(group => {
+              const cfg = ROLE_CONFIG[group.role];
+              return (
+                <div key={group.role}>
+                  <div className="flex items-center gap-2 px-1 mb-2">
+                    <Icon name={cfg.icon} size={13} className={cfg.color} />
+                    <p className={`text-xs font-semibold uppercase tracking-wider ${cfg.color}`}>
+                      {cfg.label} · {group.list.length}
+                    </p>
+                  </div>
+                  <div className="glass rounded-2xl overflow-hidden divide-y divide-white/5">
+                    {group.list.map(m => (
+                      <div key={m.contact.id}>
+                        <div className="flex items-center gap-3 px-4 py-3">
+                          <div className="relative flex-shrink-0">
+                            <div className={`w-10 h-10 rounded-xl ${m.contact.avatar} flex items-center justify-center text-white font-bold text-sm`}>
+                              {m.contact.name.charAt(0)}
+                            </div>
+                            {m.contact.online && <div className="absolute -bottom-0.5 -right-0.5 online-dot" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-white text-sm font-semibold">{m.contact.name}</div>
+                            <div className="text-white/30 text-xs">{m.contact.status}</div>
+                          </div>
+                          <button
+                            onClick={() => setEditingRole(editingRole === m.contact.id ? null : m.contact.id)}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-xl border text-[11px] font-medium transition-all ${cfg.bg} ${cfg.color}`}
+                          >
+                            <Icon name={cfg.icon} size={11} className={cfg.color} />
+                            {cfg.label}
+                            <Icon name={editingRole === m.contact.id ? "ChevronUp" : "ChevronDown"} size={11} className={cfg.color} />
+                          </button>
+                          <button
+                            onClick={() => setKickConfirm(kickConfirm === m.contact.id ? null : m.contact.id)}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-500/10 transition-all ml-1"
+                          >
+                            <Icon name="UserMinus" size={14} className="text-red-400" />
+                          </button>
+                        </div>
+
+                        {kickConfirm === m.contact.id && (
+                          <div className="px-4 py-3 bg-red-500/5 border-t border-red-500/10 flex items-center gap-3 animate-slide-up">
+                            <Icon name="AlertTriangle" size={16} className="text-red-400 flex-shrink-0" />
+                            <span className="text-red-300 text-xs flex-1">Исключить {m.contact.name.split(" ")[0]}?</span>
+                            <button onClick={() => setKickConfirm(null)} className="text-white/40 text-xs px-2 py-1">Нет</button>
+                            <button onClick={() => kickMember(m.contact.id)}
+                              className="text-white text-xs px-3 py-1 rounded-lg bg-red-500/80">Да</button>
+                          </div>
+                        )}
+
+                        {editingRole === m.contact.id && (
+                          <div className="border-t border-white/5 divide-y divide-white/5 animate-slide-up">
+                            {(Object.entries(ROLE_CONFIG) as [MemberRole, typeof ROLE_CONFIG[MemberRole]][]).map(([role, rcfg]) => (
+                              <button key={role} onClick={() => setRole(m.contact.id, role)}
+                                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all ${m.role === role ? "bg-white/5" : "hover:bg-white/3"}`}>
+                                <Icon name={rcfg.icon} size={15} className={rcfg.color} />
+                                <div className="flex-1">
+                                  <div className={`text-sm font-medium ${rcfg.color}`}>{rcfg.label}</div>
+                                  <div className="text-white/30 text-xs">{rcfg.desc}</div>
+                                </div>
+                                {m.role === role && <Icon name="Check" size={14} className="text-purple-400" />}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── PERMISSIONS TAB ── */}
+        {activeTab === "permissions" && (
+          <div className="px-4 pt-4 space-y-3 animate-slide-up">
+            <p className="text-white/40 text-sm px-1">Что могут делать обычные участники</p>
+            {[
+              { key: "membersCanInvite" as const, icon: "UserPlus", label: "Приглашать новых участников", color: "text-green-400" },
+              { key: "membersCanEdit" as const, icon: "Edit2", label: "Редактировать информацию группы", color: "text-cyan-400" },
+              { key: "membersCanPin" as const, icon: "Pin", label: "Закреплять сообщения", color: "text-orange-400" },
+              { key: "onlyAdminsPost" as const, icon: "MessageSquare", label: "Только администраторы пишут", color: "text-purple-400" },
+              { key: "slowMode" as const, icon: "Clock", label: "Медленный режим (1 сообщ/мин)", color: "text-pink-400" },
+            ].map(item => (
+              <div key={item.key} className="glass rounded-2xl flex items-center gap-3 px-4 py-4">
+                <Icon name={item.icon} size={18} className={item.color} />
+                <span className="flex-1 text-white text-sm">{item.label}</span>
+                <button
+                  onClick={() => togglePerm(item.key)}
+                  className={`w-12 h-6 rounded-full flex items-center transition-all duration-300 px-0.5 ${perms[item.key] ? "toggle-on" : "toggle-off"}`}
+                >
+                  <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform duration-300 ${perms[item.key] ? "translate-x-6" : "translate-x-0"}`} />
+                </button>
+              </div>
+            ))}
+
+            <div className="glass rounded-2xl p-4 border border-purple-500/15 mt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Icon name="Shield" size={16} className="text-purple-400" />
+                <span className="text-white text-sm font-semibold">Права администраторов</span>
+              </div>
+              <div className="space-y-2">
+                {["Удалять и редактировать сообщения", "Исключать участников", "Блокировать пользователей", "Добавлять новых администраторов"].map(right => (
+                  <div key={right} className="flex items-center gap-2">
+                    <Icon name="Check" size={13} className="text-purple-400 flex-shrink-0" />
+                    <span className="text-white/50 text-xs">{right}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── SETTINGS TAB ── */}
+        {activeTab === "settings" && (
+          <div className="px-4 pt-4 space-y-4 animate-slide-up">
+            <div className="flex items-center gap-4 glass rounded-2xl px-4 py-4">
+              <div className={`w-16 h-16 rounded-2xl ${chat.avatar} flex items-center justify-center relative flex-shrink-0`}>
+                <Icon name="Users" size={26} className="text-white/90" />
+                <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-xl flex items-center justify-center"
+                  style={{ background: "linear-gradient(135deg,#a855f7,#6366f1)" }}>
+                  <Icon name="Camera" size={13} className="text-white" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <div className="text-white font-semibold text-sm">{chat.name}</div>
+                <div className="text-white/30 text-xs mt-0.5">{members.length} участников</div>
+                <button className="text-purple-400 text-xs mt-1">Изменить фото</button>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-white/30 uppercase tracking-wider mb-2 px-1">Название</p>
+              <div className="glass rounded-2xl px-4 py-1 flex items-center gap-3">
+                <Icon name="Hash" size={16} className="text-purple-400 flex-shrink-0" />
+                <input
+                  value={groupName}
+                  onChange={e => setGroupName(e.target.value)}
+                  onBlur={saveGroupName}
+                  className="flex-1 bg-transparent text-white text-sm outline-none py-3"
+                />
+                <button onClick={saveGroupName}>
+                  <Icon name="Check" size={16} className="text-purple-400" />
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-white/30 uppercase tracking-wider mb-2 px-1">Ссылка-приглашение</p>
+              <div className="glass rounded-2xl px-4 py-3.5 flex items-center gap-3">
+                <Icon name="Link" size={16} className="text-cyan-400" />
+                <span className="flex-1 text-white/60 text-sm">pulse.app/join/abc123</span>
+                <button className="text-purple-400 text-xs font-medium">Скопировать</button>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-white/30 uppercase tracking-wider mb-2 px-1">Опасная зона</p>
+              <div className="glass rounded-2xl overflow-hidden divide-y divide-white/5">
+                <button className="w-full flex items-center gap-3 px-4 py-4 hover:bg-white/4 transition-all text-left">
+                  <Icon name="Archive" size={18} className="text-orange-400" />
+                  <span className="text-orange-400 text-sm">Архивировать группу</span>
+                </button>
+                <button className="w-full flex items-center gap-3 px-4 py-4 hover:bg-red-500/5 transition-all text-left">
+                  <Icon name="Trash2" size={18} className="text-red-400" />
+                  <span className="text-red-400 text-sm">Удалить группу</span>
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>
